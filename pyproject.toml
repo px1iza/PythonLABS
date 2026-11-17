@@ -1,20 +1,52 @@
-[project]
-name = "findex"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-authors = [
-    { name = "Liza", email = "rabirokhliza@gmail.com" }
-]
-requires-python = ">=3.13"
-dependencies = []
 
 [build-system]
-requires = ["uv_build>=0.13.9,<0.14.0"]
-build-backend = "uv_build"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "findex"
+version = "0.4.0"
+description = "A small ranked full-text search engine"
+readme = "README_LAB_04.md"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+]
+
+[project.scripts]
+findex = "findex.cli:app"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.2.0",
-    "ruff>=0.17.5",
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "hypothesis>=6.100.0",
+    "pyright>=1.1.0",
+    "ruff>=0.5.0",
+    "build>=1.2.0",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/findex"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "slow: tests that take more than one second",
+]
+
+[tool.pyright]
+include = ["src/findex", "tests"]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

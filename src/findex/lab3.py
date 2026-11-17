@@ -71,6 +71,7 @@ class SearchResult:
 # --------------------------------------------------
 
 class Index(Mapping):
+        __hash__ = object.__hash__
     def __init__(self, postings, documents):
         self.postings = postings
         self.documents = documents
