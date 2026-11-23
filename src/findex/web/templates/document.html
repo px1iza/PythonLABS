@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ document.filename }} — Findex</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <main class="container">
+        <a class="back-link" href="/">← Повернутися до пошуку</a>
+        <section class="document-card">
+            <p class="eyebrow">Документ №{{ document.doc_id }}</p>
+            <h1>{{ document.filename }}</h1>
+            <p class="muted">Довжина документа: {{ document.length }} слів</p>
+            <div class="document-text">{{ document.text }}</div>
+        </section>
+    </main>
+</body>
+</html>

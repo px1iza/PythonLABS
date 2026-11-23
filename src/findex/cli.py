@@ -336,3 +336,26 @@ def crawl_command(
     except (OSError, ValueError, RuntimeError) as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=1) from error
+
+
+@app.command("serve")
+def serve_command(
+    port: Annotated[
+        int,
+        typer.Option("--port", min=1, max=65535, help="HTTP server port."),
+    ] = 8000,
+    workers: Annotated[
+        int,
+        typer.Option("--workers", min=1, help="Number of server workers."),
+    ] = 1,
+) -> None:
+    """Start the Findex web application."""
+    import uvicorn
+
+    uvicorn.run(
+        "findex.web.app:app",
+        host="0.0.0.0",
+        port=port,
+        workers=workers,
+        log_level="info",
+    )

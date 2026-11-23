@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Findex — пошук документів</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <main class="container">
+        <header class="hero">
+            <div class="logo">F</div>
+            <div>
+                <h1>Findex</h1>
+                <p>Пошукова система за текстовими документами</p>
+            </div>
+        </header>
+
+        <form class="search-form" action="/" method="get">
+            <label for="q">Що шукаємо?</label>
+            <div class="search-line">
+                <input
+                    id="q"
+                    name="q"
+                    type="search"
+                    value="{{ query }}"
+                    placeholder="Введіть пошуковий запит..."
+                    required
+                >
+                <button type="submit">Знайти</button>
+            </div>
+
+            <div class="filters">
+                <label>
+                    Алгоритм ранжування
+                    <select name="scorer">
+                        <option value="bm25" {% if scorer == "bm25" %}selected{% endif %}>BM25</option>
+                        <option value="tfidf" {% if scorer == "tfidf" %}selected{% endif %}>TF-IDF</option>
+                    </select>
+                </label>
+
+                <label>
+                    Результатів на сторінці
+                    <select name="k">
+                        {% for amount in [5, 10, 20, 50] %}
+                        <option value="{{ amount }}" {% if k == amount %}selected{% endif %}>{{ amount }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+        </form>
+
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+
+        {% if response %}
+        <section class="results">
+            <div class="results-heading">
+                <h2>Результати пошуку</h2>
+                <span>Знайдено: {{ response.total }}</span>
+            </div>
+
+            {% if results %}
+                {% for result in results %}
+                <article class="result">
+                    <div class="result-top">
+                        <a href="/document/{{ result.doc_id }}">{{ result.filename }}</a>
+                        <span class="score">Оцінка: {{ "%.4f"|format(result.score) }}</span>
+                    </div>
+                    <p class="snippet">{{ result.snippet_html }}</p>
+                    <a class="document-link" href="/docs/{{ result.doc_id }}">Переглянути дані документа →</a>
+                </article>
+                {% endfor %}
+            {% else %}
+                <p>За цим запитом нічого не знайдено.</p>
+            {% endif %}
+
+            {% if response.pages > 1 %}
+            <nav class="pagination">
+                {% if page > 1 %}
+                <a href="/?q={{ query|urlencode }}&k={{ k }}&scorer={{ scorer }}&page={{ page - 1 }}">← Назад</a>
+                {% endif %}
+                <span>Сторінка {{ page }} з {{ response.pages }}</span>
+                {% if page < response.pages %}
+                <a href="/?q={{ query|urlencode }}&k={{ k }}&scorer={{ scorer }}&page={{ page + 1 }}">Далі →</a>
+                {% endif %}
+            </nav>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        <footer>
+            <a href="/stats">Статистика індексу</a>
+            <span>Findex · Lab 7</span>
+        </footer>
+    </main>
+</body>
+</html>
