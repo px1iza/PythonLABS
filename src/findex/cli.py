@@ -1,15 +1,24 @@
 
+import asyncio
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import Annotated, Literal
 
 import typer
 from rich.console import Console
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 from rich.table import Table
 
+from findex.crawler import crawl
 from findex.lab3 import BM25, TfIdf, open_index, save_index, search
 from findex.parallel import build_index_parallel
 
@@ -64,12 +73,7 @@ def index_command(
     ] = Path("index_v4.bin"),
     workers: Annotated[
         int,
-        typer.Option(
-            "--workers",
-            "-w",
-            min=1,
-            help="Number of workers.",
-        ),
+        typer.Option("--workers", "-w", min=1, help="Number of workers."),
     ] = 1,
     executor: Annotated[
         Literal["serial", "threads", "processes"],
@@ -207,10 +211,128 @@ def stats_command(
 
             table.add_row("Documents", str(index.num_docs))
             table.add_row("Unique terms", str(len(index)))
-            table.add_row("Average document length", f"{index.avg_doc_length:.2f}")
+            table.add_row(
+                "Average document length",
+                f"{index.avg_doc_length:.2f}",
+            )
 
             console.print(table)
 
     except (OSError, ValueError, TypeError, KeyError) as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+
+@app.command("crawl")
+def crawl_command(
+    start_url: Annotated[
+        str,
+        typer.Argument(help="Starting URL for crawling."),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Output JSONL file."),
+    ] = Path("data/crawled.jsonl"),
+    max_pages: Annotated[
+        int,
+        typer.Option("--max-pages", min=1, help="Maximum number of pages."),
+    ] = 200,
+    concurrency: Annotated[
+        int,
+        typer.Option("--concurrency", "-c", min=1, help="Number of workers."),
+    ] = 5,
+) -> None:
+    """Crawl a website and save pages to JSONL."""
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    crawl_logger = logging.getLogger("findex.crawler")
+    file_handler = logging.FileHandler("crawl.log", encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s: %(message)s"
+        )
+    )
+    crawl_logger.addHandler(file_handler)
+
+    async def run_crawler() -> None:
+        started = time.perf_counter()
+        pages_count = 0
+        errors_count = 0
+
+        try:
+            with output.open("w", encoding="utf-8") as file:
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TextColumn("{task.completed} pages"),
+                    TimeElapsedColumn(),
+                    console=console,
+                ) as progress:
+
+                    task = progress.add_task(
+                        "Crawling website...",
+                        total=max_pages,
+                    )
+
+                    async for page in crawl(
+                        start_url=start_url,
+                        max_pages=max_pages,
+                        concurrency=concurrency,
+                    ):
+                        record = {
+                            "url": page.url,
+                            "status": page.status,
+                            "text": page.text,
+                            "links": page.links,
+                            "bytes": page.bytes_received,
+                            "elapsed": page.elapsed,
+                        }
+
+                        file.write(
+                            json.dumps(record, ensure_ascii=False) + "\n"
+                        )
+                        file.flush()
+
+                        pages_count += 1
+
+                        elapsed = time.perf_counter() - started
+                        speed = pages_count / elapsed if elapsed > 0 else 0
+
+                        progress.update(
+                            task,
+                            completed=pages_count,
+                            description=f"Crawling: {speed:.2f} pages/sec",
+                        )
+
+        finally:
+            crawl_logger.removeHandler(file_handler)
+            file_handler.close()
+
+        elapsed = time.perf_counter() - started
+        speed = pages_count / elapsed if elapsed > 0 else 0
+
+        console.print()
+        console.print("[green]Crawling completed![/green]")
+
+        table = Table(title="Crawl Statistics")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", justify="right")
+
+        table.add_row("Pages collected", str(pages_count))
+        table.add_row("Errors", str(errors_count))
+        table.add_row("Time", f"{elapsed:.2f} seconds")
+        table.add_row("Speed", f"{speed:.2f} pages/sec")
+        table.add_row("Output", str(output))
+        table.add_row("Log file", "crawl.log")
+
+        console.print(table)
+
+    try:
+        asyncio.run(run_crawler())
+
+    except (OSError, ValueError, RuntimeError) as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=1) from error
