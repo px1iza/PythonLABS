@@ -1,16 +1,14 @@
-
 import argparse
 import pickle
-import json
 import re
 import time
 import tracemalloc
 from pathlib import Path
 
-from findex.models import InvertedIndex, Posting, DocMeta
+from findex.models import InvertedIndex
 
 
-def intersect_merge(left, right):
+def intersect_merge(left: list[int], right: list[int]) -> list[int]:
     result = []
     i = 0
     j = 0
@@ -28,7 +26,7 @@ def intersect_merge(left, right):
     return result
 
 
-def union_merge(left, right):
+def union_merge(left: list[int], right: list[int]) -> list[int]:
     result = []
     i = 0
     j = 0
@@ -50,7 +48,7 @@ def union_merge(left, right):
     return result
 
 
-def difference_merge(left, right):
+def difference_merge(left: list[int], right: list[int]) -> list[int]:
     result = []
     i = 0
     j = 0
@@ -72,30 +70,22 @@ def difference_merge(left, right):
     return result
 
 
-def get_document_ids(index, term):
+def get_document_ids(index: InvertedIndex, term: str) -> list[int]:
     return [
         posting.doc_id
         for posting in index.postings.get(term, [])
     ]
 
 
-def parse_query(index, query, engine):
-    tokens = re.findall(r"\w+|[()]", query.upper())
+def search_merge(index: InvertedIndex, query: str) -> list[int]:
+    tokens = re.findall(r"\w+|[()]", query.casefold())
 
-    if engine == "merge":
-        all_documents = sorted(index.documents)
-        intersect = intersect_merge
-        union = union_merge
-        difference = difference_merge
-    else:
-        all_documents = set(index.documents)
-        intersect = lambda a, b: sorted(set(a) & set(b))
-        union = lambda a, b: sorted(set(a) | set(b))
-        difference = lambda a, b: sorted(set(a) - set(b))
+    if not tokens:
+        return []
 
     position = 0
 
-    def primary():
+    def parse_primary():
         nonlocal position
 
         if position >= len(tokens):
@@ -104,29 +94,33 @@ def parse_query(index, query, engine):
         if tokens[position] == "(":
             position += 1
             result = parse_or()
+
             if position < len(tokens) and tokens[position] == ")":
                 position += 1
+
             return result
 
-        if tokens[position] == "NOT":
+        if tokens[position] == "not":
             position += 1
-            return difference(all_documents, primary())
+            return difference_merge(
+                sorted(index.documents),
+                parse_primary(),
+            )
 
         term = tokens[position]
         position += 1
-
-        return get_document_ids(index, term.casefold())
+        return get_document_ids(index, term)
 
     def parse_and():
         nonlocal position
-        result = primary()
+        result = parse_primary()
 
         while position < len(tokens):
-            if tokens[position] == "AND":
+            if tokens[position] == "and":
                 position += 1
-                result = intersect(result, primary())
-            elif tokens[position] not in ("OR", ")"):
-                result = intersect(result, primary())
+                result = intersect_merge(result, parse_primary())
+            elif tokens[position] not in ("or", ")"):
+                result = intersect_merge(result, parse_primary())
             else:
                 break
 
@@ -136,37 +130,92 @@ def parse_query(index, query, engine):
         nonlocal position
         result = parse_and()
 
-        while position < len(tokens) and tokens[position] == "OR":
+        while position < len(tokens) and tokens[position] == "or":
             position += 1
-            result = union(result, parse_and())
+            result = union_merge(result, parse_and())
+
+        return result
+
+    return parse_or()
+
+
+def search_set(index: InvertedIndex, query: str) -> list[int]:
+    tokens = re.findall(r"\w+|[()]", query.casefold())
+
+    if not tokens:
+        return []
+
+    position = 0
+    all_documents = set(index.documents)
+
+    def parse_primary():
+        nonlocal position
+
+        if position >= len(tokens):
+            return set()
+
+        if tokens[position] == "(":
+            position += 1
+            result = parse_or()
+
+            if position < len(tokens) and tokens[position] == ")":
+                position += 1
+
+            return result
+
+        if tokens[position] == "not":
+            position += 1
+            return all_documents - parse_primary()
+
+        term = tokens[position]
+        position += 1
+        return set(get_document_ids(index, term))
+
+    def parse_and():
+        nonlocal position
+        result = parse_primary()
+
+        while position < len(tokens):
+            if tokens[position] == "and":
+                position += 1
+                result &= parse_primary()
+            elif tokens[position] not in ("or", ")"):
+                result &= parse_primary()
+            else:
+                break
+
+        return result
+
+    def parse_or():
+        nonlocal position
+        result = parse_and()
+
+        while position < len(tokens) and tokens[position] == "or":
+            position += 1
+            result |= parse_and()
 
         return result
 
     return sorted(parse_or())
 
 
-def load_index(filename):
-    path = Path(filename)
+def parse_query(
+    index: InvertedIndex,
+    query: str,
+    engine: str = "merge",
+) -> list[int]:
+    if engine == "merge":
+        return search_merge(index, query)
 
-    if path.suffix == ".json":
-        with open(path, "r", encoding="utf-8") as file:
-            data = json.load(file)
+    if engine == "set":
+        return search_set(index, query)
 
-        postings = {
-            term: [Posting(doc_id, frequency) for doc_id, frequency in values]
-            for term, values in data["postings"].items()
-        }
+    raise ValueError("Engine must be 'merge' or 'set'.")
 
-        documents = {
-            int(doc_id): DocMeta(**doc)
-            for doc_id, doc in data["documents"].items()
-        }
 
-        return InvertedIndex(postings, documents)
-
-    # Never load pickle files from untrusted sources:
-    # deserialization can execute arbitrary code.
-    with open(path, "rb") as file:
+def load_index(filename: str | Path) -> InvertedIndex:
+    """Load a pickle index. Never load pickle files from untrusted sources."""
+    with open(filename, "rb") as file:
         return pickle.load(file)
 
 
@@ -174,14 +223,14 @@ def main():
     parser = argparse.ArgumentParser(
         description="Search an inverted index."
     )
-    parser.add_argument("index")
-    parser.add_argument("query")
+    parser.add_argument("index", help="Path to the saved index")
+    parser.add_argument("query", help="Boolean search query")
     parser.add_argument(
         "--engine",
         choices=["merge", "set"],
         default="merge",
+        help="Search algorithm",
     )
-
     args = parser.parse_args()
 
     tracemalloc.start()

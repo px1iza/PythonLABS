@@ -10,7 +10,9 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from findex.lab3 import BM25, TfIdf, build_index, open_index, save_index, search
+from findex.lab3 import BM25, TfIdf, open_index, save_index, search
+from findex.parallel import build_index_parallel
+
 
 app = typer.Typer(
     name="findex",
@@ -60,6 +62,22 @@ def index_command(
         Path,
         typer.Option("--output", "-o", help="Output index file."),
     ] = Path("index_v4.bin"),
+    workers: Annotated[
+        int,
+        typer.Option(
+            "--workers",
+            "-w",
+            min=1,
+            help="Number of workers.",
+        ),
+    ] = 1,
+    executor: Annotated[
+        Literal["serial", "threads", "processes"],
+        typer.Option(
+            "--executor",
+            help="Execution mode: serial, threads, or processes.",
+        ),
+    ] = "serial",
 ) -> None:
     """Build an inverted index from text documents."""
     if not data.is_dir():
@@ -75,9 +93,13 @@ def index_command(
         ) as progress:
             task = progress.add_task("Building index...", total=1)
 
-            index = build_index(data)
-            save_index(index, output)
+            index = build_index_parallel(
+                data,
+                workers=workers,
+                executor=executor,
+            )
 
+            save_index(index, output)
             progress.update(task, completed=1)
 
         console.print(f"[green]Index saved to:[/green] {output}")
@@ -86,7 +108,7 @@ def index_command(
 
         logger.info("Index successfully created.")
 
-    except (OSError, ValueError, TypeError) as error:
+    except (OSError, ValueError, TypeError, RuntimeError) as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=1) from error
 
@@ -126,8 +148,6 @@ def search_command(
                 scorer=scoring,
                 top_k=top,
             )
-
-            documents = index.documents
 
         if json_output:
             output = [
